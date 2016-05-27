@@ -295,7 +295,7 @@ MODRET notify_set_conf_notify(cmd_rec *cmd) {
 	c = add_config_param_str("Notify", 1, (void *) cmd->argv[1]);
 	c->flags |= CF_MERGEDOWN;
 	
-	return HANDLED(cmd);
+	return PR_HANDLED(cmd);
 }
 
 MODRET notify_set_conf_subject(cmd_rec *cmd) {
@@ -307,7 +307,7 @@ MODRET notify_set_conf_subject(cmd_rec *cmd) {
 	c = add_config_param_str("NotifySubject", 1, (void *) cmd->argv[1]);
 	c->flags |= CF_MERGEDOWN;
 	
-	return HANDLED(cmd);
+	return PR_HANDLED(cmd);
 }
 
 MODRET notify_set_conf_body(cmd_rec *cmd) {
@@ -319,7 +319,7 @@ MODRET notify_set_conf_body(cmd_rec *cmd) {
 	c = add_config_param_str("NotifyBody", 1, (void *) cmd->argv[1]);
 	c->flags |= CF_MERGEDOWN;
 	
-	return HANDLED(cmd);
+	return PR_HANDLED(cmd);
 }
 
 MODRET notify_set_conf_from_name(cmd_rec *cmd) {
@@ -331,7 +331,7 @@ MODRET notify_set_conf_from_name(cmd_rec *cmd) {
 	c = add_config_param_str("NotifyFromName", 1, (void *) cmd->argv[1]);
 	c->flags |= CF_MERGEDOWN;
 	
-	return HANDLED(cmd);
+	return PR_HANDLED(cmd);
 }
 
 MODRET notify_set_conf_from_address(cmd_rec *cmd) {
@@ -343,7 +343,7 @@ MODRET notify_set_conf_from_address(cmd_rec *cmd) {
 	c = add_config_param_str("NotifyFromAddress", 1, (void *) cmd->argv[1]);
 	c->flags |= CF_MERGEDOWN;
 	
-	return HANDLED(cmd);
+	return PR_HANDLED(cmd);
 }
 
 static conftable notify_conftab[] = {
