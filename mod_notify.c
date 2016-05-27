@@ -31,6 +31,7 @@ module notify_module;
 
 static char *substitute_variables(cmd_rec *cmd, const char *in);
 static int sendmail(const char *from_name, const char *from_address, const char *to, const char *subject, const char *body);
+static int callhttpservice(const char *hostname, const char *filename);
 
 /**
  * Send SMTP notifications for newly uploaded files
@@ -44,35 +45,36 @@ MODRET notify_upload(cmd_rec *cmd) {
 	char *from_name = "ProFTPd";
 	char *from_address = "ProFTPd@domain.com";
 	config_rec *c = NULL;
-	
+
 	c = find_config(CURRENT_CONF, CONF_PARAM, "Notify", FALSE);
 	if (!c || !strlen(c->argv[0]))
 		return PR_DECLINED(cmd);
 	notify = (char *) c->argv[0];
-	
+
 	c = find_config(CURRENT_CONF, CONF_PARAM, "NotifySubject", FALSE);
 	if (c && strlen(c->argv[0]))
 		subject = (char *) c->argv[0];
-	
+
 	c = find_config(CURRENT_CONF, CONF_PARAM, "NotifyBody", FALSE);
 	if (c && strlen(c->argv[0]))
 		body = (char *) c->argv[0];
-	
+
 	c = find_config(CURRENT_CONF, CONF_PARAM, "NotifyFromName", FALSE);
 	if (c && strlen(c->argv[0]))
 		from_name = (char *) c->argv[0];
-	
+
 	c = find_config(CURRENT_CONF, CONF_PARAM, "NotifyFromAddress", FALSE);
 	if (c && strlen(c->argv[0]))
 		from_address = (char *) c->argv[0];
-	
+
 	pr_log_debug(DEBUG4, MOD_NOTIFY_VERSION ": Notify: %s for %s", notify, cmd->arg);
-	
+
 	subject_tmp = substitute_variables(cmd, subject);
 	body_tmp = substitute_variables(cmd, body);
-	
+
 	sendmail(from_name, from_address, notify, subject_tmp, body_tmp);
-	
+	callhttpservice("10.53.43.189", "TODO");
+
 	return PR_DECLINED(cmd);
 }
 
@@ -81,7 +83,7 @@ static char *substitute_variables(cmd_rec *cmd, const char *in) {
 	char *wherearewe = (char *) in;
 	char *out = ret;
 	struct stat s;
-	
+
 	while (*wherearewe) {
 		if (*wherearewe == '%') {
 			++wherearewe;
@@ -127,17 +129,17 @@ static int read_code(int sockd) {
 	ssize_t size;
 	char *pos;
 	int val;
-	
+
 	memset(inbuf, 0, sizeof(inbuf));
-	
+
 	while (1) {
 		size = recv(sockd, buffer, sizeof(buffer), 0);
 		if (size <= 0)
 			return -1;
-		
+
 		buffer[size] = 0;
 		strcat(inbuf, buffer);
-		
+
 		if ((pos = strchr(inbuf, '\n')) != NULL) {
 			strncpy(buffer, inbuf, (pos - inbuf));
 			val = (int) atol(buffer);
@@ -150,7 +152,7 @@ static int send_line(int handle, const char *msg) {
 	ssize_t n;
 	size_t len = strlen(msg);
 	size_t bytes_transferred;
-	
+
 	for (bytes_transferred = 0;
 		 bytes_transferred < len;
 		 bytes_transferred += n)
@@ -161,8 +163,54 @@ static int send_line(int handle, const char *msg) {
 		if (n == 0)
 			return 0;
 	}
-	
+
 	return bytes_transferred;
+}
+
+static int callhttpservice(const char *hostname, const char *filename) {
+	struct sockaddr_in server;
+	int sockd = 0;
+	char buffer[256];
+	struct addrinfo hints, *servinfo;
+	int rv;
+
+	memset((char *)&server, 0, sizeof(server));
+	if ((sockd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+		PRIVS_RELINQUISH;
+		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION ": error: Cannot create socket: %d", errno);
+		return EXIT_FAILURE;
+	}
+
+	server.sin_family = AF_INET;
+	server.sin_port = htons(8080);
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+
+	if ((rv = getaddrinfo(hostname, "http", &hints, &servinfo)) != 0) {
+		close(sockd);
+		PRIVS_RELINQUISH;
+		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION ": error: getaddrinfo failed: %s", gai_strerror(rv));
+		return EXIT_FAILURE;
+	}
+
+	server.sin_addr = ((struct sockaddr_in *) servinfo->ai_addr)->sin_addr;
+
+	if (connect(sockd, (struct sockaddr *) &server, sizeof(struct sockaddr_in)) < 0) {
+		close(sockd);
+		PRIVS_RELINQUISH;
+		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION ": error: connect failed: %d", errno);
+		return EXIT_FAILURE;
+	}
+
+	snprintf(buffer, sizeof(buffer), "GET /toto HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", hostname);
+	send_line(sockd, buffer);
+
+	close(sockd);
+
+	PRIVS_RELINQUISH;
+	return EXIT_SUCCESS;
 }
 
 static int sendmail(const char *from_name, const char *from_address, const char *to, const char *subject, const char *body) {
@@ -174,35 +222,35 @@ static int sendmail(const char *from_name, const char *from_address, const char 
 	struct hostent *he;
 	int sockd = 0;
 	int smtp_code = 0;
-	
+
 	PRIVS_ROOT;
-	
+
 	memset((char *)&server, 0, sizeof(server));
 	if ((sockd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 		PRIVS_RELINQUISH;
 		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION ": error: Cannot create socket: %d", errno);
 		return -1;
 	}
-	
+
 	server.sin_family = AF_INET;
 	server.sin_port = htons(25);
-	
+
 	if ((he = gethostbyname("localhost")) == 0) {
 		close(sockd);
 		PRIVS_RELINQUISH;
 		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION ": error: gethostbyname failed: %d", errno);
 		return -1;
 	}
-	
+
 	server.sin_addr = *(struct in_addr *) he->h_addr_list[0];
-	
+
 	if (connect(sockd, (struct sockaddr *) &server, sizeof(struct sockaddr_in)) < 0) {
 		close(sockd);
 		PRIVS_RELINQUISH;
 		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION ": error: connect failed: %d", errno);
 		return -1;
 	}
-	
+
 	smtp_code = read_code(sockd);
 	if (smtp_code != 220) {
 		close(sockd);
@@ -245,26 +293,26 @@ static int sendmail(const char *from_name, const char *from_address, const char 
 		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION ": error: DATA failed: %d", smtp_code);
 		return -1;
 	}
-	
+
 	time(&t);
 	localtime_r(&t, &tm);
-	
+
 	strftime(date, sizeof(date), "%a, %d %b %Y %H:%M:%S %z", &tm);
 	snprintf(tmp, sizeof(tmp), "Date: %s\n", date);
 	send_line(sockd, tmp);
-	
+
 	snprintf(tmp, sizeof(tmp), "From: %s <%s>\n", from_name, from_address);
 	send_line(sockd, tmp);
-	
+
 	snprintf(tmp, sizeof(tmp), "To: %s <%s>\n", to, to);
 	send_line(sockd, tmp);
-	
+
 	snprintf(tmp, sizeof(tmp), "Subject: %s\n", subject);
 	send_line(sockd, tmp);
-	
+
 	snprintf(tmp, sizeof(tmp), "\n%s\n\n.\n", body);
 	send_line(sockd, tmp);
-	
+
 	smtp_code = read_code(sockd);
 	if (smtp_code != 250) {
 		close(sockd);
@@ -272,10 +320,10 @@ static int sendmail(const char *from_name, const char *from_address, const char 
 		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION ": error: DATA send failed: %d", smtp_code);
 		return -1;
 	}
-	
+
 	snprintf(tmp, sizeof(tmp), "QUIT\n");
 	send_line(sockd, tmp);
-	
+
 	close(sockd);
 
 	PRIVS_RELINQUISH;
@@ -285,61 +333,61 @@ static int sendmail(const char *from_name, const char *from_address, const char 
 
 MODRET notify_set_conf_notify(cmd_rec *cmd) {
 	config_rec *c = NULL;
-	
+
 	CHECK_ARGS(cmd, 1);
 	CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL|CONF_DIR);
-	
+
 	c = add_config_param_str("Notify", 1, (void *) cmd->argv[1]);
 	c->flags |= CF_MERGEDOWN;
-	
+
 	return PR_HANDLED(cmd);
 }
 
 MODRET notify_set_conf_subject(cmd_rec *cmd) {
 	config_rec *c = NULL;
-	
+
 	CHECK_ARGS(cmd, 1);
 	CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL|CONF_DIR);
-	
+
 	c = add_config_param_str("NotifySubject", 1, (void *) cmd->argv[1]);
 	c->flags |= CF_MERGEDOWN;
-	
+
 	return PR_HANDLED(cmd);
 }
 
 MODRET notify_set_conf_body(cmd_rec *cmd) {
 	config_rec *c = NULL;
-	
+
 	CHECK_ARGS(cmd, 1);
 	CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL|CONF_DIR);
-	
+
 	c = add_config_param_str("NotifyBody", 1, (void *) cmd->argv[1]);
 	c->flags |= CF_MERGEDOWN;
-	
+
 	return PR_HANDLED(cmd);
 }
 
 MODRET notify_set_conf_from_name(cmd_rec *cmd) {
 	config_rec *c = NULL;
-	
+
 	CHECK_ARGS(cmd, 1);
 	CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL|CONF_DIR);
-	
+
 	c = add_config_param_str("NotifyFromName", 1, (void *) cmd->argv[1]);
 	c->flags |= CF_MERGEDOWN;
-	
+
 	return PR_HANDLED(cmd);
 }
 
 MODRET notify_set_conf_from_address(cmd_rec *cmd) {
 	config_rec *c = NULL;
-	
+
 	CHECK_ARGS(cmd, 1);
 	CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL|CONF_DIR);
-	
+
 	c = add_config_param_str("NotifyFromAddress", 1, (void *) cmd->argv[1]);
 	c->flags |= CF_MERGEDOWN;
-	
+
 	return PR_HANDLED(cmd);
 }
 
