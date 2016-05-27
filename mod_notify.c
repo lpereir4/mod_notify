@@ -186,7 +186,7 @@ static int callhttpservice(const char *hostname, const char *filename) {
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
-	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_socktype = 0;
 
 	if ((rv = getaddrinfo(hostname, "http", &hints, &servinfo)) != 0) {
 		close(sockd);
