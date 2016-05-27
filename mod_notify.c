@@ -29,8 +29,8 @@
 
 module notify_module;
 
-char *substitute_variables(cmd_rec *cmd, const char *in);
-int sendmail(const char *from_name, const char *from_address, const char *to, const char *subject, const char *body);
+static char *substitute_variables(cmd_rec *cmd, const char *in);
+static int sendmail(const char *from_name, const char *from_address, const char *to, const char *subject, const char *body);
 
 /**
  * Send SMTP notifications for newly uploaded files
