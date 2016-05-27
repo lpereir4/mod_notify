@@ -47,7 +47,7 @@ MODRET notify_upload(cmd_rec *cmd) {
 	
 	c = find_config(CURRENT_CONF, CONF_PARAM, "Notify", FALSE);
 	if (!c || !strlen(c->argv[0]))
-		return DECLINED(cmd);
+		return PR_DECLINED(cmd);
 	notify = (char *) c->argv[0];
 	
 	c = find_config(CURRENT_CONF, CONF_PARAM, "NotifySubject", FALSE);
@@ -73,7 +73,7 @@ MODRET notify_upload(cmd_rec *cmd) {
 	
 	sendmail(from_name, from_address, notify, subject_tmp, body_tmp);
 	
-	return DECLINED(cmd);
+	return PR_DECLINED(cmd);
 }
 
 static char *substitute_variables(cmd_rec *cmd, const char *in) {
@@ -166,10 +166,7 @@ static int send_line(int handle, const char *msg) {
 }
 
 static int sendmail(const char *from_name, const char *from_address, const char *to, const char *subject, const char *body) {
-	FILE *p = NULL;
-	int pfd;
 	char tmp[256];
-	char tmp2[256];
 	char date[256];
 	time_t t;
 	struct tm tm;
