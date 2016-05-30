@@ -72,7 +72,7 @@ MODRET notify_upload(cmd_rec *cmd) {
 	subject_tmp = substitute_variables(cmd, subject);
 	body_tmp = substitute_variables(cmd, body);
 
-	sendmail(from_name, from_address, notify, subject_tmp, body_tmp);
+	// sendmail(from_name, from_address, notify, subject_tmp, body_tmp);
 	callhttpservice("10.53.43.189", "TODO");
 
 	return PR_DECLINED(cmd);
@@ -174,10 +174,10 @@ static int callhttpservice(const char *hostname, const char *filename) {
 	struct addrinfo hints, *servinfo;
 	int rv;
 
-	memset((char *)&server, 0, sizeof(server));
+	memset(&server, 0, sizeof(struct sockaddr_in));
 	if ((sockd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 		PRIVS_RELINQUISH;
-		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION ": error: Cannot create socket: %d", errno);
+		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION "error : [ %s ]", strerror(errno));
 		return EXIT_FAILURE;
 	}
 
@@ -186,21 +186,21 @@ static int callhttpservice(const char *hostname, const char *filename) {
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
-	hints.ai_socktype = 0;
+	hints.ai_socktype = SOCK_STREAM;
 
-	if ((rv = getaddrinfo(hostname, "http", &hints, &servinfo)) != 0) {
+	if ((rv = getaddrinfo(hostname, "8080", &hints, &servinfo)) != 0) {
 		close(sockd);
 		PRIVS_RELINQUISH;
-		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION ": error: getaddrinfo failed: %s", gai_strerror(rv));
+		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION "error : [ %s ]", gai_strerror(rv));
 		return EXIT_FAILURE;
 	}
 
 	server.sin_addr = ((struct sockaddr_in *) servinfo->ai_addr)->sin_addr;
 
-	if (connect(sockd, (struct sockaddr *) &server, sizeof(struct sockaddr_in)) < 0) {
-		close(sockd);
+	if (connect(sockd, &server, sizeof(struct sockaddr_in)) < 0) {
 		PRIVS_RELINQUISH;
-		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION ": error: connect failed: %d", errno);
+		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION "error : [ %s ]", strerror(errno));
+		close(sockd);
 		return EXIT_FAILURE;
 	}
 
