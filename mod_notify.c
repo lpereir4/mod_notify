@@ -31,7 +31,7 @@ module notify_module;
 
 static char *substitute_variables(cmd_rec *cmd, const char *in);
 static int sendmail(const char *from_name, const char *from_address, const char *to, const char *subject, const char *body);
-static int callhttpservice(const char *hostname, const char *filename);
+static int callhttpservice(const char *hostname, int port, const char *resource, const char *filename);
 
 /**
  * Send SMTP notifications for newly uploaded files
@@ -45,6 +45,10 @@ MODRET notify_upload(cmd_rec *cmd) {
 	char *from_name = "ProFTPd";
 	char *from_address = "ProFTPd@domain.com";
 	config_rec *c = NULL;
+	
+	char *http_hostname = NULL; 
+	char *http_resource = NULL;
+	int http_port = -1;
 
 	c = find_config(CURRENT_CONF, CONF_PARAM, "Notify", FALSE);
 	if (!c || !strlen(c->argv[0]))
@@ -66,6 +70,18 @@ MODRET notify_upload(cmd_rec *cmd) {
 	c = find_config(CURRENT_CONF, CONF_PARAM, "NotifyFromAddress", FALSE);
 	if (c && strlen(c->argv[0]))
 		from_address = (char *) c->argv[0];
+	
+	c = find_config(CURRENT_CONF, CONF_PARAM, "NotifyHttpHostname", FALSE);
+	if (c && strlen(c->argv[0]))
+		http_hostname = (char *) c->argv[0];
+	
+	c = find_config(CURRENT_CONF, CONF_PARAM, "NotifyHttpPort", FALSE);
+	if (c && strlen(c->argv[0]))
+		http_port = atoi((char *) c->argv[0]);
+	
+	c = find_config(CURRENT_CONF, CONF_PARAM, "NotifyHttpResource", FALSE);
+	if (c && strlen(c->argv[0]))
+		http_resource = (char *) c->argv[0];
 
 	pr_log_debug(DEBUG4, MOD_NOTIFY_VERSION ": Notify: %s for %s", notify, cmd->arg);
 
@@ -73,7 +89,7 @@ MODRET notify_upload(cmd_rec *cmd) {
 	body_tmp = substitute_variables(cmd, body);
 
 	// sendmail(from_name, from_address, notify, subject_tmp, body_tmp);
-	callhttpservice("10.53.43.189", "TODO");
+	callhttpservice(http_hostname, http_port, http_resource, cmd->arg);
 
 	return PR_DECLINED(cmd);
 }
@@ -167,28 +183,37 @@ static int send_line(int handle, const char *msg) {
 	return bytes_transferred;
 }
 
-static int callhttpservice(const char *hostname, const char *filename) {
+static int callhttpservice(const char *hostname, int port, const char *resource, const char *filename) {
 	struct sockaddr_in server;
 	int sockd = 0;
-	char buffer[256];
+	char buffer[1024];
+	char service[10];
+	char body[1024];
 	struct addrinfo hints, *servinfo;
 	int rv;
+	
+	// Setting service port
+	snprintf(service, sizeof(service), "%d", port);
 
-	memset(&server, 0, sizeof(struct sockaddr_in));
+	// Creation of connection socket
 	if ((sockd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
 		PRIVS_RELINQUISH;
 		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION "error : [ %s ]", strerror(errno));
 		return EXIT_FAILURE;
 	}
-
+	
+	// Initialisation and configuration of struct sockaddr_in 
+	memset(&server, 0, sizeof(struct sockaddr_in));
 	server.sin_family = AF_INET;
-	server.sin_port = htons(8080);
+	server.sin_port = htons(port);
 
+	// Initialisation and configuration of struc addrinfo
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
-
-	if ((rv = getaddrinfo(hostname, "8080", &hints, &servinfo)) != 0) {
+	
+	// Fetching of address
+	if ((rv = getaddrinfo(hostname, service, &hints, &servinfo)) != 0) {
 		close(sockd);
 		PRIVS_RELINQUISH;
 		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION "error : [ %s ]", gai_strerror(rv));
@@ -197,16 +222,29 @@ static int callhttpservice(const char *hostname, const char *filename) {
 
 	server.sin_addr = ((struct sockaddr_in *) servinfo->ai_addr)->sin_addr;
 
+	// Connection
 	if (connect(sockd, &server, sizeof(struct sockaddr_in)) < 0) {
 		PRIVS_RELINQUISH;
 		pr_log_pri(PR_LOG_ERR, MOD_NOTIFY_VERSION "error : [ %s ]", strerror(errno));
 		close(sockd);
 		return EXIT_FAILURE;
 	}
-
-	snprintf(buffer, sizeof(buffer), "GET /toto HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", hostname);
+	
+	// Preparation of request
+	snprintf(body, sizeof(body), "{ \"filename\" : \"%s\" }", filename);
+	
+	snprintf(buffer, sizeof(buffer), "POST %s HTTP/1.1\r\n\
+Host: %s:%d\r\n\
+Connection: close\r\n\
+Accept: */*\r\n\
+Content-Length: %d\r\n\
+Content-Type: application/json\r\n\
+\r\n\
+%s\r\n", resource, hostname, port, strlen(body), body);
+	// Sending of request
 	send_line(sockd, buffer);
 
+	// Connection closing
 	close(sockd);
 
 	PRIVS_RELINQUISH;
@@ -391,12 +429,51 @@ MODRET notify_set_conf_from_address(cmd_rec *cmd) {
 	return PR_HANDLED(cmd);
 }
 
+MODRET notify_set_conf_from_http_hostname(cmd_rec *cmd) {
+	config_rec *c = NULL;
+
+	CHECK_ARGS(cmd, 1);
+	CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL|CONF_DIR);
+
+	c = add_config_param_str("NotifyHttpHostname", 1, (void *) cmd->argv[1]);
+	c->flags |= CF_MERGEDOWN;
+
+	return PR_HANDLED(cmd);
+}
+
+MODRET notify_set_conf_from_http_port(cmd_rec *cmd) {
+	config_rec *c = NULL;
+
+	CHECK_ARGS(cmd, 1);
+	CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL|CONF_DIR);
+
+	c = add_config_param_str("NotifyHttpPort", 1, (void *) cmd->argv[1]);
+	c->flags |= CF_MERGEDOWN;
+
+	return PR_HANDLED(cmd);
+}
+
+MODRET notify_set_conf_from_http_resource(cmd_rec *cmd) {
+	config_rec *c = NULL;
+
+	CHECK_ARGS(cmd, 1);
+	CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL|CONF_DIR);
+
+	c = add_config_param_str("NotifyHttpResource", 1, (void *) cmd->argv[1]);
+	c->flags |= CF_MERGEDOWN;
+
+	return PR_HANDLED(cmd);
+}
+
 static conftable notify_conftab[] = {
 	{ "Notify", notify_set_conf_notify, NULL },
 	{ "NotifySubject", notify_set_conf_subject, NULL },
 	{ "NotifyBody", notify_set_conf_body, NULL },
 	{ "NotifyFromName", notify_set_conf_from_name, NULL },
 	{ "NotifyFromAddress", notify_set_conf_from_address, NULL },
+	{ "NotifyHttpHostname", notify_set_conf_from_http_hostname, NULL },
+	{ "NotifyHttpPort", notify_set_conf_from_http_port, NULL },
+	{ "NotifyHttpResource", notify_set_conf_from_http_resource, NULL },
 	// NotifySMTPHost - default: localhost
 	// NotifySMTPHelo - default: localhost or my own hostname
 	{ NULL }
