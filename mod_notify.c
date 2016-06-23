@@ -246,6 +246,8 @@ Content-Type: application/json\r\n\
 
 	// Connection closing
 	close(sockd);
+	
+	pr_log_debug(DEBUG4, MOD_NOTIFY_VERSION ": Resource : %s / Hostname : %s / Port : %d", resource, hostname, port);
 
 	PRIVS_RELINQUISH;
 	return EXIT_SUCCESS;
