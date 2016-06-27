@@ -189,6 +189,8 @@ static int callhttpservice(const char *hostname, int port, const char *resource,
 	char buffer[1024];
 	char service[10];
 	char body[1024];
+	char user[255];
+	char path[255];
 	struct addrinfo hints, *servinfo;
 	int rv;
 	
@@ -230,8 +232,11 @@ static int callhttpservice(const char *hostname, int port, const char *resource,
 		return EXIT_FAILURE;
 	}
 	
+	// Extraction of user login
+	sscanf(filename, "/home/%s/%s", user, path);
+	
 	// Preparation of request
-	snprintf(body, sizeof(body), "{ \"filename\" : \"%s\" }", filename);
+	snprintf(body, sizeof(body), "{ \"filename\" : \"%s\", \"user\" : \"%s\" }", filename, user);
 	
 	snprintf(buffer, sizeof(buffer), "POST %s HTTP/1.1\r\n\
 Host: %s:%d\r\n\
