@@ -31,7 +31,7 @@ module notify_module;
 
 static char *substitute_variables(cmd_rec *cmd, const char *in);
 static int sendmail(const char *from_name, const char *from_address, const char *to, const char *subject, const char *body);
-static int callhttpservice(const char *hostname, int port, const char *resource, const char *filename);
+static int callhttpservice(const char *hostname, int port, const char *resource, const char *filename, const char *user);
 
 /**
  * Send SMTP notifications for newly uploaded files
@@ -44,11 +44,17 @@ MODRET notify_upload(cmd_rec *cmd) {
 	char *body_tmp;
 	char *from_name = "ProFTPd";
 	char *from_address = "ProFTPd@domain.com";
+	const char *user;
 	config_rec *c = NULL;
 	
 	char *http_hostname = NULL; 
 	char *http_resource = NULL;
 	int http_port = -1;
+	
+	user = pr_table_get(session.notes, "mod_auth.orig-user", NULL);
+	if (user == NULL) {
+		return PR_DECLINED(cmd);
+	}
 
 	c = find_config(CURRENT_CONF, CONF_PARAM, "Notify", FALSE);
 	if (!c || !strlen(c->argv[0]))
@@ -89,7 +95,7 @@ MODRET notify_upload(cmd_rec *cmd) {
 	body_tmp = substitute_variables(cmd, body);
 
 	// sendmail(from_name, from_address, notify, subject_tmp, body_tmp);
-	callhttpservice(http_hostname, http_port, http_resource, cmd->arg);
+	callhttpservice(http_hostname, http_port, http_resource, cmd->arg, user);
 
 	return PR_DECLINED(cmd);
 }
@@ -183,13 +189,12 @@ static int send_line(int handle, const char *msg) {
 	return bytes_transferred;
 }
 
-static int callhttpservice(const char *hostname, int port, const char *resource, const char *filename) {
+static int callhttpservice(const char *hostname, int port, const char *resource, const char *filename, const char *user) {
 	struct sockaddr_in server;
 	int sockd = 0;
 	char buffer[1024];
 	char service[10];
 	char body[1024];
-	char user[255];
 	char path[255];
 	struct addrinfo hints, *servinfo;
 	int rv;
@@ -231,9 +236,6 @@ static int callhttpservice(const char *hostname, int port, const char *resource,
 		close(sockd);
 		return EXIT_FAILURE;
 	}
-	
-	// Extraction of user login
-	sscanf(filename, "/home/%s/%s", user, path);
 	
 	// Preparation of request
 	snprintf(body, sizeof(body), "{ \"filename\" : \"%s\", \"user\" : \"%s\" }", filename, user);
